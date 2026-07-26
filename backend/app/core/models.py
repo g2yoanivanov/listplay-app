@@ -88,10 +88,10 @@ class Track(models.Model):
     cover_url = models.URLField(max_length=500, blank=True, null=True)
     duration_ms = models.IntegerField(help_text="Duration in milliseconds")
 
-    genres = models.ManyToManyField(Genre, related_name='tracks', blank=True)
-
     def __str__(self):
-        return f'{self.artists.all()[0]} // {self.title}'
+        first_artist = self.artists.first()
+        artist_name = first_artist.name if first_artist else "Unknown Artist"
+        return f'{artist_name} // {self.title}'
 
 
 class Playlist(models.Model):
