@@ -15,6 +15,7 @@ router = DefaultRouter()
 router.register('genres', views.GenreViewSet)
 router.register('artists', views.ArtistViewSet)
 router.register('tracks', views.TrackViewSet)
+router.register('playlists', views.PlaylistViewSet)
 
 app_name = 'playlist'
 

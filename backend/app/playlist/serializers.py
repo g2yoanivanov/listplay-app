@@ -6,6 +6,8 @@ from core.models import (
     Genre,
     Artist,
     Track,
+    Playlist,
+    PlaylistTrack
 )
 
 
@@ -47,10 +49,10 @@ class ArtistSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         """Create a new artist."""
-        genres = validated_data.pop('genres', [])
+        genres_data = validated_data.pop('genres', [])
         artist = Artist.objects.create(**validated_data)
 
-        self._get_or_create_genres(genres, artist)
+        self._get_or_create_genres(genres_data, artist)
 
         return artist
 
@@ -97,10 +99,10 @@ class TrackSerializer(serializers.ModelSerializer):
         """
         Create a new track.
         """
-        artists = validated_data.pop('artists', [])
+        artists_data = validated_data.pop('artists', [])
         track = Track.objects.create(**validated_data)
 
-        self._get_or_create_artists(artists, track)
+        self._get_or_create_artists(artists_data, track)
 
         return track
 
@@ -118,4 +120,89 @@ class TrackSerializer(serializers.ModelSerializer):
             setattr(instance, attr, value)
 
         instance.save()
+        return instance
+
+
+class PlaylistTrackSerializer(serializers.ModelSerializer):
+    """
+    Serializer for the intermediate model to include the 'order'.
+    """
+    tracks = TrackSerializer(read_only=True)
+
+    add_tracks = serializers.ListField(
+        child=serializers.DictField(),
+        write_only=True,
+        required=False
+    )
+
+    class Meta:
+        model = PlaylistTrack
+        fields = ['track', 'order', 'added_at']
+
+
+class PlaylistSerializer(serializers.ModelSerializer):
+    tracks = PlaylistTrackSerializer(
+        source='playlisttrack_set',
+        many=True,
+        read_only=True
+    )
+
+    add_tracks = serializers.ListField(
+        child=serializers.DictField(),
+        write_only=True,
+        required=False
+    )
+
+    class Meta:
+        model = Playlist
+        fields = [
+            'id', 'name', 'description',
+            'cover_img', 'is_public',
+            'tracks', 'created_at',
+            'add_tracks'
+        ]
+        read_only_fields = ['id', 'created_at']
+
+    def create(self, validated_data):
+        tracks_data = validated_data.pop('add_tracks', [])
+        playlist = Playlist.objects.create(**validated_data)
+
+        for track_obj in tracks_data:
+            spotify_id = track_obj.get('spotify_id')
+            order = track_obj.get('order')
+
+            track = Track.objects.get(spotify_id=spotify_id)
+
+            PlaylistTrack.objects.get_or_create(
+                playlist=playlist,
+                track=track,
+                defaults={'order': order}
+            )
+
+        return playlist
+
+    def update(self, instance, validated_data):
+        tracks_data = validated_data.pop('add_tracks', None)
+
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        if tracks_data is not None:
+            instance.playlisttrack_set.all().delete()
+
+            for track_dict in tracks_data:
+                spotify_id = track_dict.get('spotify_id')
+                order = track_dict.get('order')
+
+                try:
+                    track = Track.objects.get(spotify_id=spotify_id)
+                    PlaylistTrack.objects.get_or_create(
+                        playlist=instance,
+                        track=track,
+                        defaults={'order': order}
+                    )
+                except Track.DoesNotExist:
+                    continue
+
         return instance

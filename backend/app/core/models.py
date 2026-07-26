@@ -3,6 +3,8 @@ Database models for the application.
 """
 import uuid
 
+from django.conf import settings
+
 from django.db import models
 from django.contrib.auth.models import (
     AbstractBaseUser,
@@ -102,7 +104,11 @@ class Playlist(models.Model):
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True, null=True)
     cover_img = models.ImageField(upload_to='playlist_covers/', blank=True, null=True)
-    created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='playlists')
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='playlists'
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     is_public = models.BooleanField(default=True)
     tracks = models.ManyToManyField(Track, through='PlaylistTrack', related_name='playlists', blank=True)

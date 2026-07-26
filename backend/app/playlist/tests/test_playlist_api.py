@@ -11,12 +11,22 @@ from rest_framework.test import APIClient
 from core.models import (
     Genre,
     Artist,
-    Track
+    Track,
+    Playlist,
+    PlaylistTrack
 )
+from playlist.serializers import PlaylistSerializer
+
 
 GENRES_URL = reverse('playlist:genre-list')
 ARTISTS_URL = reverse('playlist:artist-list')
 TRACKS_URL = reverse('playlist:track-list')
+PLAYLISTS_URL = reverse('playlist:playlist-list')
+
+
+def playlist_detail_url(playlist_id):
+    """Create and return a playlist detail URL."""
+    return reverse('playlist:playlist-detail', args=[playlist_id])
 
 
 def create_user(**params):
@@ -118,3 +128,317 @@ class PrivateMusicApiTests(TestCase):
 
         artist = Artist.objects.get(spotify_id='artist_123')
         self.assertEqual(artist.name, 'Updated Name')
+
+
+class PlaylistSerializerTests(TestCase):
+    """
+    Test the PlaylistSerializer logic.
+    """
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            email='user@example.com',
+            password='password123'
+        )
+
+        self.track1 = Track.objects.create(
+            spotify_id='track_001',
+            title='Song 1',
+            duration_ms=200000
+        )
+        self.track2 = Track.objects.create(
+            spotify_id='track_002',
+            title='Song 2',
+            duration_ms=210000
+        )
+
+    def test_create_empty_playlist(self):
+        """
+        Test creating a playlist without any tracks.
+        """
+        data = {
+            'name': 'My Chill Playlist',
+            'description': 'Perfect for coding.'
+        }
+
+        serializer = PlaylistSerializer(data=data)
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+
+        playlist = serializer.save(created_by=self.user)
+
+        self.assertEqual(playlist.name, 'My Chill Playlist')
+        self.assertEqual(playlist.tracks.count(), 0)
+
+    def test_create_playlist_with_tracks(self):
+        """Test creating a playlist with initial tracks."""
+        data = {
+            'name': 'Workout Mix',
+            'add_tracks': [
+                {'spotify_id': 'track_001', 'order': 1},
+                {'spotify_id': 'track_002', 'order': 2}
+            ]
+        }
+
+        serializer = PlaylistSerializer(data=data)
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+
+        playlist = serializer.save(created_by=self.user)
+
+        self.assertEqual(playlist.tracks.count(), 2)
+
+        pt_1 = PlaylistTrack.objects.get(playlist=playlist, track=self.track1)
+        self.assertEqual(pt_1.order, 1)
+
+        pt_2 = PlaylistTrack.objects.get(playlist=playlist, track=self.track2)
+        self.assertEqual(pt_2.order, 2)
+
+    def test_update_playlist_tracks(self):
+        """
+        Test updating a playlist to completely replace its tracks.
+        """
+        playlist = Playlist.objects.create(name='Old Mix', created_by=self.user)
+        PlaylistTrack.objects.create(playlist=playlist, track=self.track1, order=1)
+
+        data = {
+            'name': 'New Awesome Mix',
+            'add_tracks': [
+                {'spotify_id': 'track_002', 'order': 1}
+            ]
+        }
+
+        serializer = PlaylistSerializer(playlist, data=data, partial=True)
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+
+        updated_playlist = serializer.save()
+
+        self.assertEqual(updated_playlist.name, 'New Awesome Mix')
+        self.assertEqual(updated_playlist.tracks.count(), 1)
+
+        remaining_track = updated_playlist.playlisttrack_set.first()
+        self.assertEqual(remaining_track.track, self.track2)
+        self.assertEqual(remaining_track.order, 1)
+
+
+class PublicPlaylistApiTests(TestCase):
+    """
+    Test unauthenticated API requests for playlists.
+    """
+    def setUp(self):
+        self.client = APIClient()
+
+    def test_auth_required(self):
+        """Test that authentication is required to view playlists."""
+        res = self.client.get(PLAYLISTS_URL)
+        self.assertEqual(res.status_code, status.HTTP_401_UNAUTHORIZED)
+
+
+class PrivatePlaylistApiTests(TestCase):
+    """
+    Test authenticated API requests for playlists.
+    """
+    def setUp(self):
+        self.client = APIClient()
+        self.user = get_user_model().objects.create_user(
+            email='test@example.com',
+            password='password123'
+        )
+        self.client.force_authenticate(self.user)
+
+    def test_retrieve_playlists_filtering(self):
+        """
+        Test retrieving playlists.
+        Should return the user's playlists (public & private) AND other users' public playlists.
+        Should NOT return other users' private playlists.
+        """
+        other_user = get_user_model().objects.create_user(
+            email='other@example.com',
+            password='password123'
+        )
+
+        Playlist.objects.create(name='My Private', created_by=self.user, is_public=False)
+        Playlist.objects.create(name='My Public', created_by=self.user, is_public=True)
+
+        Playlist.objects.create(name='Other Public', created_by=other_user, is_public=True)
+        Playlist.objects.create(name='Other Private', created_by=other_user, is_public=False)
+
+        res = self.client.get(PLAYLISTS_URL)
+
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(res.data), 3)
+
+        returned_names = [p['name'] for p in res.data]
+        self.assertIn('My Private', returned_names)
+        self.assertIn('My Public', returned_names)
+        self.assertIn('Other Public', returned_names)
+        self.assertNotIn('Other Private', returned_names)
+
+    def test_create_playlist_assigns_user(self):
+        """
+        Test that creating a playlist automatically assigns the authenticated user.
+        """
+        payload = {
+            'name': 'Gym Motivation',
+            'is_public': False
+        }
+        res = self.client.post(PLAYLISTS_URL, payload, format='json')
+
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+
+        playlist = Playlist.objects.get(id=res.data['id'])
+
+        self.assertEqual(playlist.created_by, self.user)
+
+    def test_cannot_access_other_users_private_playlist_detail(self):
+        """
+        Test that a user gets a 404 when trying to view another user's private playlist.
+        """
+        other_user = get_user_model().objects.create_user(
+            email='other@example.com',
+            password='password123'
+        )
+        private_playlist = Playlist.objects.create(
+            name='Secret List',
+            created_by=other_user,
+            is_public=False
+        )
+
+        url = playlist_detail_url(private_playlist.id)
+        res = self.client.get(url)
+
+        self.assertEqual(res.status_code, status.HTTP_404_NOT_FOUND)
+
+
+class PlaylistActionTests(TestCase):
+    """
+    Test custom actions (add_track, remove_track) on PlaylistViewSet.
+    """
+    def setUp(self):
+        self.client = APIClient()
+        self.user = get_user_model().objects.create_user(
+            email='test@example.com',
+            password='password123'
+        )
+        self.client.force_authenticate(self.user)
+
+        self.playlist = Playlist.objects.create(name='Test Mix', created_by=self.user)
+        self.track1 = Track.objects.create(spotify_id='track_1', title='Song 1', duration_ms=200000)
+        self.track2 = Track.objects.create(spotify_id='track_2', title='Song 2', duration_ms=210000)
+
+    def test_add_track_success(self):
+        """Test successfully adding a track via the add_track action."""
+        url = f"{playlist_detail_url(self.playlist.id)}add-track/"
+        payload = {'spotify_id': 'track_1'}
+
+        res = self.client.post(url, payload, format='json')
+
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertTrue(
+            PlaylistTrack.objects.filter(playlist=self.playlist, track=self.track1, order=1).exists()
+        )
+
+    def test_add_track_missing_spotify_id(self):
+        """
+        Test that missing spotify_id returns a 400 Bad Request.
+        """
+        url = f"{playlist_detail_url(self.playlist.id)}add-track/"
+        res = self.client.post(url, {}, format='json')
+
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_add_track_not_found(self):
+        """
+        Test that adding a non-existent track returns a 404 Not Found.
+        """
+        url = f"{playlist_detail_url(self.playlist.id)}add-track/"
+        payload = {'spotify_id': 'fake_id'}
+
+        res = self.client.post(url, payload, format='json')
+
+        self.assertEqual(res.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_remove_track_success_and_reorder(self):
+        """
+        Test removing a track and verifying that the remaining tracks
+        are automatically reordered (closing the gap).
+        """
+        PlaylistTrack.objects.create(playlist=self.playlist, track=self.track1, order=1)
+        PlaylistTrack.objects.create(playlist=self.playlist, track=self.track2, order=2)
+
+        url = f"{playlist_detail_url(self.playlist.id)}remove-track/"
+        payload = {'spotify_id': 'track_1'}
+
+        res = self.client.delete(url, payload, format='json')
+
+        self.assertEqual(res.status_code, status.HTTP_204_NO_CONTENT)
+
+        self.assertFalse(
+            PlaylistTrack.objects.filter(playlist=self.playlist, track=self.track1).exists()
+        )
+
+        pt2 = PlaylistTrack.objects.get(playlist=self.playlist, track=self.track2)
+        self.assertEqual(pt2.order, 1)
+
+    def test_remove_track_not_in_playlist(self):
+        """
+        Test that trying to remove a track not in the playlist returns 404.
+        """
+        url = f"{playlist_detail_url(self.playlist.id)}remove-track/"
+        payload = {'spotify_id': 'track_1'}
+
+        res = self.client.delete(url, payload, format='json')
+
+        self.assertEqual(res.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_retrieve_other_users_public_playlist_detail(self):
+        """
+        Test user can view the detail of another user's public playlist.
+        """
+        other_user = get_user_model().objects.create_user(
+            email='other@example.com',
+            password='password123'
+        )
+        public_playlist = Playlist.objects.create(
+            name='Public Party Mix',
+            created_by=other_user,
+            is_public=True
+        )
+
+        url = playlist_detail_url(public_playlist.id)
+        res = self.client.get(url)
+
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data['name'], 'Public Party Mix')
+
+    def test_update_other_users_playlist_forbidden(self):
+        """
+        Test user cannot update another user's playlist.
+        """
+        other_user = get_user_model().objects.create_user(
+            email='other@example.com',
+            password='password123'
+        )
+        other_playlist = Playlist.objects.create(
+            name='Other Private List',
+            created_by=other_user,
+            is_public=False
+        )
+
+        url = playlist_detail_url(other_playlist.id)
+        payload = {'name': 'Hacked Name'}
+
+        res = self.client.patch(url, payload, format='json')
+
+        self.assertIn(res.status_code, [status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND])
+
+    def test_add_duplicate_track_fails(self):
+        """
+        Test adding the same track twice returns a 400 Bad Request.
+        """
+        url = f"{playlist_detail_url(self.playlist.id)}add-track/"
+        payload = {'spotify_id': 'track_1'}
+
+        res1 = self.client.post(url, payload, format='json')
+        self.assertEqual(res1.status_code, status.HTTP_200_OK)
+
+        res2 = self.client.post(url, payload, format='json')
+        self.assertEqual(res2.status_code, status.HTTP_400_BAD_REQUEST)
