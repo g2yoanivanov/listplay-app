@@ -15,7 +15,10 @@ from core.models import (
     Playlist,
     PlaylistTrack
 )
-from playlist.serializers import PlaylistSerializer
+from playlist.serializers import (
+    PlaylistSerializer,
+    TrackSerializer
+)
 
 
 GENRES_URL = reverse('playlist:genre-list')
@@ -306,3 +309,69 @@ class PrivatePlaylistApiTests(TestCase):
         res = self.client.get(url)
 
         self.assertEqual(res.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_filter_tracks_by_artists(self):
+        """
+        Test filtering tracks by artists.
+        """
+        artist1 = Artist.objects.create(name='Artist 1', spotify_id='spid1')
+        artist2 = Artist.objects.create(name='Artist 2', spotify_id='spid2')
+
+        track1 = Track.objects.create(
+            title='Track 1', spotify_id='sp1', duration_ms=120000
+        )
+        track1.artists.add(artist1)
+
+        track2 = Track.objects.create(
+            title='Track 2', spotify_id='sp2', duration_ms=120000
+        )
+        track2.artists.add(artist2)
+
+        track3 = Track.objects.create(
+            title='Track 3', spotify_id='sp3', duration_ms=120000
+        )
+
+        url = reverse('playlist:track-list')
+        res = self.client.get(url, {'artists': f'{artist1.id}'})
+
+        serializer1 = TrackSerializer(track1)
+        serializer2 = TrackSerializer(track2)
+        serializer3 = TrackSerializer(track3)
+
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertIn(serializer1.data, res.data)
+        self.assertNotIn(serializer2.data, res.data)
+        self.assertNotIn(serializer3.data, res.data)
+
+    def test_filter_tracks_by_genres(self):
+        """
+        Test filtering tracks by genres through artists.
+        """
+        genre1 = Genre.objects.create(name='Rock')
+        genre2 = Genre.objects.create(name='Pop')
+
+        artist1 = Artist.objects.create(name='Rock Band', spotify_id='spid1')
+        artist1.genres.add(genre1)
+
+        artist2 = Artist.objects.create(name='Pop Star', spotify_id='spid2')
+        artist2.genres.add(genre2)
+
+        track1 = Track.objects.create(
+            title='Rock Song', spotify_id='sp4', duration_ms=180000
+        )
+        track1.artists.add(artist1)
+
+        track2 = Track.objects.create(
+            title='Pop Song', spotify_id='sp5', duration_ms=200000
+        )
+        track2.artists.add(artist2)
+
+        url = reverse('playlist:track-list')
+        res = self.client.get(url, {'genres': f'{genre1.id},{genre2.id}'})
+
+        serializer1 = TrackSerializer(track1)
+        serializer2 = TrackSerializer(track2)
+
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertIn(serializer1.data, res.data)
+        self.assertIn(serializer2.data, res.data)

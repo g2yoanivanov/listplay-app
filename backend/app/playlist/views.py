@@ -4,6 +4,7 @@ Views for playlist-related operations.
 from django.db import transaction
 from django.db.models import Q, F
 
+from rest_framework.exceptions import ValidationError
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework import (
@@ -13,6 +14,13 @@ from rest_framework import (
 
 from rest_framework.authentication import TokenAuthentication
 from rest_framework.permissions import IsAuthenticated
+
+from drf_spectacular.utils import (
+    extend_schema,
+    extend_schema_view,
+    OpenApiParameter
+)
+from drf_spectacular.types import OpenApiTypes
 
 from core.models import (
     Genre,
@@ -49,12 +57,56 @@ class ArtistViewSet(BasePlaylistAttrViewSet):
     queryset = Artist.objects.all()
 
 
+@extend_schema_view(
+    list=extend_schema(
+        parameters=[
+            OpenApiParameter(
+                'artists',
+                OpenApiTypes.STR,
+                description='Comma separated list of artists IDs to filter'
+            ),
+            OpenApiParameter(
+                'genres',
+                OpenApiTypes.STR,
+                description='Comma separated list of genres IDs to filter'
+            )
+        ]
+    )
+)
 class TrackViewSet(BasePlaylistAttrViewSet):
     """
     Manage tracks in the database.
     """
     serializer_class = serializers.TrackSerializer
     queryset = Track.objects.all()
+
+    def _params_to_ints(self, qs):
+        """
+        Convert a list of string IDs to a list of integers
+        """
+        try:
+            return [int(str_id) for str_id in qs.split(',')]
+        except ValueError:
+            raise ValidationError('Invalid ID format. Expected integers')
+
+    def get_queryset(self):
+        """
+        Retrieve tracks and apply filters.
+        """
+        genres = self.request.query_params.get('genres')
+        artists = self.request.query_params.get('artists')
+
+        queryset = self.queryset
+
+        if genres:
+            genres_ids = self._params_to_ints(genres)
+            queryset = queryset.filter(artists__genres__id__in=genres_ids)
+
+        if artists:
+            artists_ids = self._params_to_ints(artists)
+            queryset = queryset.filter(artists__id__in=artists_ids)
+
+        return queryset.distinct()
 
 
 class PlaylistViewSet(BasePlaylistAttrViewSet):
