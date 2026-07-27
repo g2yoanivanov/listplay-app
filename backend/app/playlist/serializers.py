@@ -127,17 +127,12 @@ class PlaylistTrackSerializer(serializers.ModelSerializer):
     """
     Serializer for the intermediate model to include the 'order'.
     """
-    tracks = TrackSerializer(read_only=True)
-
-    add_tracks = serializers.ListField(
-        child=serializers.DictField(),
-        write_only=True,
-        required=False
-    )
+    track = TrackSerializer(read_only=True)
 
     class Meta:
         model = PlaylistTrack
-        fields = ['track', 'order', 'added_at']
+        fields = ['id', 'track', 'order', 'added_at']
+        read_only_fields = ['id', 'added_at']
 
 
 class PlaylistSerializer(serializers.ModelSerializer):
@@ -157,7 +152,7 @@ class PlaylistSerializer(serializers.ModelSerializer):
         model = Playlist
         fields = [
             'id', 'name', 'description',
-            'cover_img', 'is_public',
+            'is_public',
             'tracks', 'created_at',
             'add_tracks'
         ]
@@ -206,3 +201,14 @@ class PlaylistSerializer(serializers.ModelSerializer):
                     continue
 
         return instance
+
+
+class PlaylistImageSerializer(serializers.ModelSerializer):
+    """
+    Serializer for uploading playlist covers
+    """
+    class Meta:
+        model = Playlist
+        fields = ['id', 'cover_img']
+        read_only_fields = ['id']
+        extra_kwargs = {'cover_img': {'required': True}}

@@ -64,6 +64,15 @@ class PlaylistViewSet(BasePlaylistAttrViewSet):
     serializer_class = serializers.PlaylistSerializer
     queryset = Playlist.objects.all()
 
+    def get_serializer_class(self):
+        """
+        Return the serializer class for the request
+        """
+        if self.action == 'upload_cover':
+            return serializers.PlaylistImageSerializer
+
+        return self.serializer_class
+
     def get_queryset(self):
         """
         Filter the queryset to return only public playlists or
@@ -161,3 +170,17 @@ class PlaylistViewSet(BasePlaylistAttrViewSet):
                 {'error': 'track is not in this playlist'},
                 status=status.HTTP_404_NOT_FOUND
             )
+
+    @action(detail=True, methods=['POST'], url_path='upload-cover')
+    def upload_cover(self, request, pk=None):
+        """
+        Upload a cover to a playlist
+        """
+        playlist = self.get_object()
+        serializer = self.get_serializer(playlist, data=request.data)
+
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_200_OK)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
