@@ -65,7 +65,7 @@ class PrivateMusicApiTests(TestCase):
         res = self.client.get(GENRES_URL)
 
         self.assertEqual(res.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(res.data), 2)
+        self.assertEqual(len(res.data['results']), 2)
 
     def test_create_artist_with_nested_genres(self):
         """Test creating an artist and automatically creating/linking genres."""
@@ -267,9 +267,9 @@ class PrivatePlaylistApiTests(TestCase):
         res = self.client.get(PLAYLISTS_URL)
 
         self.assertEqual(res.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(res.data), 3)
+        self.assertEqual(len(res.data['results']), 3)
 
-        returned_names = [p['name'] for p in res.data]
+        returned_names = [p['name'] for p in res.data['results']]
         self.assertIn('My Private', returned_names)
         self.assertIn('My Public', returned_names)
         self.assertIn('Other Public', returned_names)
@@ -339,9 +339,9 @@ class PrivatePlaylistApiTests(TestCase):
         serializer3 = TrackSerializer(track3)
 
         self.assertEqual(res.status_code, status.HTTP_200_OK)
-        self.assertIn(serializer1.data, res.data)
-        self.assertNotIn(serializer2.data, res.data)
-        self.assertNotIn(serializer3.data, res.data)
+        self.assertIn(serializer1.data, res.data['results'])
+        self.assertNotIn(serializer2.data, res.data['results'])
+        self.assertNotIn(serializer3.data, res.data['results'])
 
     def test_filter_tracks_by_genres(self):
         """
@@ -373,5 +373,47 @@ class PrivatePlaylistApiTests(TestCase):
         serializer2 = TrackSerializer(track2)
 
         self.assertEqual(res.status_code, status.HTTP_200_OK)
-        self.assertIn(serializer1.data, res.data)
-        self.assertIn(serializer2.data, res.data)
+        self.assertIn(serializer1.data, res.data['results'])
+        self.assertIn(serializer2.data, res.data['results'])
+
+    def test_search_tracks_in_playlist_with_pagination(self):
+        """
+        Test searching tracks within a playlist returns paginated results.
+        """
+        playlist = Playlist.objects.create(created_by=self.user, name='My Mix')
+
+        artist1 = Artist.objects.create(name='Metallica', spotify_id='m1')
+        artist2 = Artist.objects.create(name='Eminem', spotify_id='e1')
+
+        track1 = Track.objects.create(title='Nothing Else Matters', spotify_id='t1', duration_ms=100)
+        track1.artists.add(artist1)
+
+        track2 = Track.objects.create(title='Lose Yourself', spotify_id='t2', duration_ms=100)
+        track2.artists.add(artist2)
+
+        track3 = Track.objects.create(title='Stan', spotify_id='t3', duration_ms=100)
+        track3.artists.add(artist2)
+
+        PlaylistTrack.objects.create(playlist=playlist, track=track1, order=1)
+        PlaylistTrack.objects.create(playlist=playlist, track=track2, order=2)
+        PlaylistTrack.objects.create(playlist=playlist, track=track3, order=3)
+
+        url = reverse('playlist:playlist-search-tracks', args=[playlist.id])
+        res_title = self.client.get(url, {'q': 'nothing'})
+
+        self.assertEqual(res_title.status_code, status.HTTP_200_OK)
+
+        self.assertIn('count', res_title.data)
+        self.assertIn('next', res_title.data)
+        self.assertIn('previous', res_title.data)
+        self.assertIn('results', res_title.data)
+
+        self.assertEqual(res_title.data['count'], 1)
+        self.assertEqual(len(res_title.data['results']), 1)
+        self.assertEqual(res_title.data['results'][0]['title'], 'Nothing Else Matters')
+
+        res_artist = self.client.get(url, {'q': 'emin'})
+
+        self.assertEqual(res_artist.status_code, status.HTTP_200_OK)
+        self.assertEqual(res_artist.data['count'], 2)
+        self.assertEqual(len(res_artist.data['results']), 2)

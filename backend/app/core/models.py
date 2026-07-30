@@ -135,3 +135,22 @@ class PlaylistTrack(models.Model):
 
     def __str__(self):
         return f'{self.playlist.name} - {self.track.title}'
+
+
+class SpotifyToken(models.Model):
+    """
+    Model for the Spotify Tokens
+    """
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='spotify_token'
+    )
+    access_token = models.CharField(max_length=512)
+    refresh_token = models.CharField(max_length=512)
+    expires_in = models.DateTimeField()
+    token_type = models.CharField(max_length=64)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Spotify Token for {self.user.email}"

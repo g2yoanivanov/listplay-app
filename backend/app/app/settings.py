@@ -43,6 +43,8 @@ INSTALLED_APPS = [
     'user',
     'playlist',
 
+    'spotify',
+
     'rest_framework',
     'rest_framework.authtoken',
     'drf_spectacular',
@@ -135,8 +137,16 @@ STATIC_ROOT = '/vol/web/static'
 
 REST_FRAMEWORK = {
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'PAGE_SIZE': 10,
 }
 
 SPECTACULAR_SETTING = {
     'COMPONENT_SPLIT_REQUEST': True
 }
+
+# SPOTIFY API SETTINGS
+
+SPOTIFY_CLIENT_ID = os.environ.get('SPOTIFY_CLIENT_ID')
+SPOTIFY_CLIENT_SECRET = os.environ.get('SPOTIFY_CLIENT_SECRET')
+SPOTIFY_REDIRECT_URI = os.environ.get('SPOTIFY_REDIRECT_URI')

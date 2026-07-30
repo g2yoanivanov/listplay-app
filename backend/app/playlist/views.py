@@ -236,3 +236,37 @@ class PlaylistViewSet(BasePlaylistAttrViewSet):
             return Response(serializer.data, status=status.HTTP_200_OK)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                'q',
+                OpenApiTypes.STR,
+                description='Search track by title or artist name'
+            )
+        ],
+        responses={200: serializers.TrackSerializer(many=True)}
+    )
+    @action(detail=True, methods=['GET'], url_path='search-tracks')
+    def search_tracks(self, request, pk=None):
+        """
+        Search for tracks within a specific playlist
+        """
+        playlist = self.get_object()
+        search_query = request.query_params.get('q', '')
+
+        tracks = Track.objects.filter(playlisttrack__playlist=playlist)
+
+        if search_query:
+            tracks = tracks.filter(
+                Q(title__icontains=search_query) |
+                Q(artists__name__icontains=search_query)
+            ).distinct()
+
+        page = self.paginate_queryset(tracks)
+        if page is not None:
+            serializer = serializers.TrackSerializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = serializers.TrackSerializer(tracks, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)

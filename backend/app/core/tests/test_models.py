@@ -7,6 +7,9 @@ from django.contrib.auth import get_user_model
 
 from core import models
 
+from django.utils import timezone
+from datetime import timedelta
+
 
 class UserModelTests(TestCase):
     """
@@ -179,3 +182,28 @@ class MusicModelTests(TestCase):
 
         with self.assertRaises(IntegrityError):
             models.PlaylistTrack.objects.create(playlist=playlist, track=track, order=2)
+
+
+class SpotifyTokenModelTests(TestCase):
+    """
+    Test SpotifyToken Model
+    """
+
+    def test_create_spotify_token(self):
+        """
+        Test creating tokens is successful.
+        """
+        user = get_user_model().objects.create_user('spotifyuser@example.com', 'testpass123')
+        expires = timezone.now() + timedelta(hours=1)
+
+        token = models.SpotifyToken.objects.create(
+            user=user,
+            access_token='mock_access_token',
+            refresh_token='mock_refresh_token',
+            expires_in=expires,
+            token_type='Bearer'
+        )
+
+        self.assertEqual(token.user, user)
+        self.assertEqual(token.access_token, 'mock_access_token')
+        self.assertEqual(str(token), f"Spotify Token for {user.email}")
