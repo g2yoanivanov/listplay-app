@@ -2,8 +2,11 @@
 Database models for the application.
 """
 import uuid
+import requests
 
 from django.conf import settings
+
+from django.utils import timezone
 
 from django.db import models
 from django.contrib.auth.models import (
@@ -154,3 +157,33 @@ class SpotifyToken(models.Model):
 
     def __str__(self):
         return f"Spotify Token for {self.user.email}"
+
+    def is_valid(self):
+        """
+        Checks if the token is still valid based on the expiration time.
+        """
+        expiration_time = self.created_at + timezone.timedelta(seconds=self.expires_in)
+        return timezone.now() < expiration_time
+
+    def refresh(self):
+        """
+        Requests a new access token from Spotify using the refresh token.
+        """
+        response = requests.post(
+            "https://accounts.spotify.com/api/token",
+            data={
+                "grant_type": "refresh_token",
+                "refresh_token": self.refresh_token,
+                "client_id": settings.SPOTIFY_CLIENT_ID,
+                "client_secret": settings.SPOTIFY_CLIENT_SECRET,
+            },
+        )
+
+        if response.status_code == 200:
+            data = response.json()
+            self.access_token = data.get("access_token")
+            self.expires_in = data.get("expires_in")
+            self.created_at = timezone.now()
+            self.save()
+        else:
+            raise Exception("Failed to refresh Spotify token.")
