@@ -13,8 +13,21 @@ from datetime import timedelta
 
 from django.conf import settings
 from django.utils import timezone
+from django.shortcuts import get_object_or_404
 
-from core.models import SpotifyToken
+from core.models import (
+    SpotifyToken,
+    Playlist,
+    Track,
+    Artist
+)
+
+from .services import (
+    SpotifyException,
+    search_tracks,
+    create_plalist_on_spotify,
+    add_tracks_to_spotify_playlist
+)
 
 
 class AuthURLView(APIView):
@@ -96,3 +109,145 @@ class SpotifyCallbackView(APIView):
         )
 
         return Response({'message': 'Spotify account successfully connected!'}, status=status.HTTP_200_OK)
+
+
+class SpotifySearchView(APIView):
+    """
+    Search tracks on Spotify by a key word.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        query = request.GET.get('q')
+
+        if not query:
+            return Response(
+                {'error': 'No search query provided'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            results = search_tracks(request.user, query)
+            return Response({'results': results}, status=status.HTTP_200_OK)
+        except SpotifyException as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            return Response(
+                {'error': 'An unexpected error occurred while searching tracks.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class ExportPlaylistView(APIView):
+    """
+    Export a playlist to Spotify.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, playlist_id):
+        playlist = get_object_or_404(Playlist, id=playlist_id, user=request.user)
+        valid_tracks = playlist.tracks.exclude(spotify_id__isnull=True).exclude(spotify_id__exact='')
+
+        if not valid_tracks.exists():
+            return Response(
+                {'error': 'No valid tracks with Spotify IDs found in the playlist.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        track_ids = [track.spotify_id for track in valid_tracks]
+
+        try:
+            spotify_playlist = create_plalist_on_spotify(
+                user=request.user,
+                name=playlist.name,
+                description=playlist.description or "Exported from ListPlay"
+            )
+
+            add_tracks_to_spotify_playlist(
+                user=request.user,
+                spotify_playlist_id=spotify_playlist['id'],
+                spotify_track_ids=track_ids
+            )
+
+            return Response(
+                {
+                    'message': 'Playlist successfully exported to Spotify!',
+                    'spotify_url': spotify_playlist.get('external_urls', {}).get('spotify', '')
+                },
+                status=status.HTTP_201_CREATED
+            )
+        except SpotifyException as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            return Response(
+                {'error': 'An unexpected error occurred while exporting the playlist.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class AddTrackToPlaylistView(APIView):
+    """
+    Add a track to a specific playlist.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, playlist_id):
+        playlist = get_object_or_404(Playlist, id=playlist_id, user=request.user)
+
+        spotify_id = request.data.get('spotify_id')
+        title = request.data.get('title')
+        artists = request.data.get('artists')
+        duration_ms = request.data.get('duration_ms', 0)
+        image_url = request.data.get('image_url', '')
+
+        if not all([spotify_id, title, artists]):
+            return Response(
+                {'error': 'Missing required track information.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        track, created = Track.objects.get_or_create(
+            spotify_id=spotify_id,
+            defaults={
+                'title': title,
+                'duration_ms': duration_ms,
+                'image_url': image_url
+            }
+        )
+
+        if created:
+            artists_obj = []
+            for artist_item in artists:
+                if isinstance(artist_item, dict):
+                    artist_obj, _ = Artist.objects.get_or_create(
+                        spotify_id=artist_item.get('spotify_id'),
+                        defaults={'name': artist_item.get('name')}
+                    )
+
+                else:
+                    artist_obj, _ = Artist.objects.get_or_create(
+                        name=artist_item
+                    )
+
+                artists_obj.append(artist_obj)
+
+            track.artists.set(artists_obj)
+
+        if track in playlist.tracks.all():
+            return Response(
+                {'error': 'Track already exists in the playlist.'},
+                status=status.HTTP_200_OK
+            )
+
+        playlist.tracks.add(track)
+
+        return Response(
+            {
+                'message': 'Track added to playlist successfully.',
+                'track_id': track.id,
+                'spotify_id': track.spotify_id,
+                'title': track.title,
+                'was_created': created
+            },
+            status=status.HTTP_201_CREATED
+        )

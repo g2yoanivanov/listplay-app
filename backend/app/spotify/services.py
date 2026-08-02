@@ -55,7 +55,10 @@ def search_tracks(user, query, limit=10):
         formatted_tracks.append({
             'spotify_id': track.get("id"),
             'title': track.get("name"),
-            'artists': [artist.get("name") for artist in track.get("artists", [])],
+            'artists': [
+                {'spotify_id': artist.get('id'), 'name': artist.get('name')}
+                for artist in track.get('artists', [])
+            ],
             'duration_ms': track.get("duration_ms"),
             'image_url': track.get("album", {}).get("images", [{}])[0].get("url")
         })
