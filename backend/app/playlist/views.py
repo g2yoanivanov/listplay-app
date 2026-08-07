@@ -78,7 +78,7 @@ class TrackViewSet(BasePlaylistAttrViewSet):
     Manage tracks in the database.
     """
     serializer_class = serializers.TrackSerializer
-    queryset = Track.objects.all()
+    queryset = Track.objects.prefetch_related('artists', 'artists__genres').all()
 
     def _params_to_ints(self, qs):
         """
@@ -114,7 +114,7 @@ class PlaylistViewSet(BasePlaylistAttrViewSet):
     Manage tracks in the database.
     """
     serializer_class = serializers.PlaylistSerializer
-    queryset = Playlist.objects.all()
+    queryset = Playlist.objects.prefetch_related('tracks', 'tracks__artists', 'tracks__artists__genres').all()
 
     def get_serializer_class(self):
         """
@@ -165,19 +165,22 @@ class PlaylistViewSet(BasePlaylistAttrViewSet):
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        last_track = playlist.playlisttrack_set.order_by('-order').first()
-        next_order = (last_track.order + 1) if last_track else 1
+        with transaction.atomic():
+            playlist = Playlist.objects.select_for_update().get(pk=pk)
 
-        playlist_track, created = PlaylistTrack.objects.get_or_create(
-            playlist=playlist,
-            track=track,
-            defaults={'order': next_order}
-        )
+            last_track = playlist.playlisttrack_set.order_by('-order').first()
+            next_order = (last_track.order + 1) if last_track else 1
+
+            playlist_track, created = PlaylistTrack.objects.get_or_create(
+                playlist=playlist,
+                track=track,
+                defaults={'order': next_order}
+            )
 
         if not created:
             return Response(
-                {'error': 'track is alredy in the playlist'},
-                status=status.HTTP_400_BAD_REQUEST
+                {'status': 'track is already in the playlist'},
+                status=status.HTTP_200_OK
             )
 
         return Response({'status': 'Track added'}, status=status.HTTP_200_OK)
@@ -255,7 +258,9 @@ class PlaylistViewSet(BasePlaylistAttrViewSet):
         playlist = self.get_object()
         search_query = request.query_params.get('q', '')
 
-        tracks = Track.objects.filter(playlisttrack__playlist=playlist)
+        tracks = Track.objects.filter(
+            playlisttrack__playlist=playlist
+        ).prefetch_related('artists', 'artists__genres')
 
         if search_query:
             tracks = tracks.filter(
